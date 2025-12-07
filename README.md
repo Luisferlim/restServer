@@ -168,8 +168,3 @@ http://localhost:3000
 ```
 
 ```
-
----
-
-Pronto! É só copiar e colar no seu README.md.
-```
