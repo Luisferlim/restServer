@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package receitas;
+
+message Receita {
+  int32 id = 1;
+  string externalId = 2;
+  string name = 3;
+  string category = 4;
+  string instructions = 5;
+  string dateAdded = 6;
+}
+
+message ListaReceitas {
+  repeated Receita receitas = 1;
+}

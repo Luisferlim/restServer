@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Gerenciador de Receitas</title>
+    <style>
+        body { 
+            font-family: sans-serif; 
+            max-width: 800px; 
+            margin: 2rem auto; 
+            padding: 0 1rem; 
+        }
+        
+        .card { 
+            border: 1px solid #ccc; 
+            padding: 20px; 
+            margin-bottom: 20px; 
+            border-radius: 8px; 
+        }
+
+        h3 { margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        
+        input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        
+        button { 
+            padding: 8px 15px; 
+            cursor: pointer; 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            border-radius: 4px; 
+        }
+        button:hover { background: #0056b3; }
+        
+        button.delete { background: #dc3545; }
+        button.delete:hover { background: #a71d2a; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 15px; }
+        th, td { text-align: left; padding: 10px; border-bottom: 1px solid #ddd; }
+
+        #resultadoHarmonizacao {
+            margin-top: 15px;
+            padding: 10px;
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            display: none; 
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Gerenciador de Receitas</h1>
+
+    <div class="card">
+        <h3>Nova Receita</h3>
+        <input type="text" id="inputNome" placeholder="Nome (ex: Pizza)">
+        <button onclick="adicionar()">Adicionar</button>
+        <span id="msgStatus" style="margin-left: 10px; font-weight: bold;"></span>
+    </div>
+
+    <div class="card">
+        <h3>Meus Favoritos</h3>
+        <table id="tabelaReceitas">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nome</th>
+                    <th>Categoria</th>
+                </tr>
+            </thead>
+            <tbody id="listaCorpo">
+                </tbody>
+        </table>
+        <p id="semDados" style="display:none; text-align:center; color: #666;">Lista vazia.</p>
+    </div>
+
+    <div class="card">
+        <h3>Harmonização (Prato + Bebida)</h3>
+        <p>Receba uma sugestão de bebida para aleatório.</p>
+        
+        <div>
+            <button onclick="harmonizar()">Sugerir Aleatório</button>
+        </div>
+
+        <div id="resultadoHarmonizacao"></div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:3000/api'; 
+
+        window.onload = carregarLista;
+
+        async function carregarLista() {
+            try {
+                const res = await fetch(`${API_URL}/favorites`);
+                const receitas = await res.json();
+                
+                const tbody = document.getElementById('listaCorpo');
+                tbody.innerHTML = '';
+
+                if (receitas.length === 0) {
+                    document.getElementById('semDados').style.display = 'block';
+                    return;
+                }
+                document.getElementById('semDados').style.display = 'none';
+
+                receitas.forEach(r => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${r.id}</td>
+                        <td>${r.name}</td>
+                        <td>${r.category}</td>
+                        <td>
+                            <button class="delete" onclick="deletar(${r.id})">Excluir</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } catch (e) {
+                console.error("Erro ao carregar");
+            }
+        }
+
+        async function adicionar() {
+            const nome = document.getElementById('inputNome').value;
+            const msg = document.getElementById('msgStatus');
+            
+            if(!nome) return alert("Digite um nome!");
+            msg.innerText = "Buscando...";
+            msg.style.color = "black";
+
+            try {
+                const res = await fetch(`${API_URL}/favorites`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ mealName: nome })
+                });
+                const dados = await res.json();
+
+                if (res.status === 201) {
+                    msg.innerText = "Sucesso!";
+                    msg.style.color = "green";
+                    document.getElementById('inputNome').value = '';
+                    carregarLista();
+                } else {
+                    msg.innerText = dados.message || "Erro";
+                    msg.style.color = "red";
+                }
+            } catch (e) {
+                msg.innerText = "Erro de conexão";
+                msg.style.color = "red";
+            }
+        }
+
+        async function deletar(id) {
+            if(!confirm("Excluir receita?")) return;
+            try {
+                await fetch(`${API_URL}/favorites/${id}`, { method: 'DELETE' });
+                carregarLista();
+            } catch (e) { alert("Erro ao excluir"); }
+        }
+
+        async function harmonizar() {
+            buscarSugestao('');
+        }
+
+
+        async function buscarSugestao(params) {
+            const div = document.getElementById('resultadoHarmonizacao');
+            div.style.display = 'block';
+            div.innerText = "Carregando sugestão...";
+            div.style.color = "black";
+
+            try {
+                const res = await fetch(`${API_URL}/pairing/suggestion${params}`);
+                const data = await res.json();
+
+                if (res.status === 200) {
+                    div.innerHTML = `
+                        <strong>Sugestão:</strong> ${data.message}<br><br>
+                        <strong>Prato:</strong> ${data.mainCourse.name}<br>
+                        <strong>Instruções:</strong> ${data.mainCourse.instructions}<br><br>
+                        <strong>Bebida:</strong> ${data.suggestedDrink.name} (${data.suggestedDrink.type})<br>
+                        <strong>Ingredientes:</strong> ${data.suggestedDrink.ingredients}
+                    `;
+                } else {
+                    div.innerHTML = `<strong>Erro:</strong> ${data.message}`;
+                    div.style.color = "red";
+                }
+            } catch (e) {
+                div.innerText = "Erro ao conectar com o servidor.";
+                div.style.color = "red";
+            }
+        }
+    </script>
+</body>
+</html>

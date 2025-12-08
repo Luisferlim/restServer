@@ -1,0 +1,155 @@
+openapi: 3.1.0
+info:
+  title: API de Receitas (DogFinder/MealFinder)
+  version: 1.0.0
+  description: API para gerenciar receitas favoritas com suporte a JSON, XML e Protobuf. Inclui funcionalidade extra de harmonização de bebidas.
+servers:
+  - url: http://localhost:3000
+paths:
+  /api/favorites:
+    get:
+      summary: Lista Receitas
+      description: Retorna a lista de receitas favoritas.
+      parameters:
+        - in: query
+          name: formato
+          schema:
+            type: string
+            enum: [json, xml, proto]
+          description: "Opcional. Use 'xml' para XML ou 'proto' para Protocol Buffer ou 'json' para JSON."
+      responses:
+        '200':
+          description: Lista retornada com sucesso
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Recipe'
+            application/xml:
+              schema:
+                type: string
+                example: "<favorites><recipe><id>1</id>...</recipe></favorites>"
+            application/x-protobuf:
+              schema:
+                type: string
+                format: binary
+                description: Payload binário (requer decodificação via .proto)
+
+    post:
+      summary: Adiciona nova receita
+      description: Busca dados na TheMealDB pelo nome e salva na lista.
+      parameters:
+        - in: query
+          name: formato
+          schema:
+            type: string
+            enum: [json, xml]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mealName:
+                  type: string
+                  example: "Arrabiata"
+      responses:
+        '201':
+          description: Criado com Sucesso
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recipe'
+            application/xml:
+              schema:
+                type: string
+                example: "<recipe><id>2</id><name>Arrabiata</name>...</recipe>"
+        '404':
+          description: Receita não encontrada na API externa
+        '409':
+          description: Conflito (Receita Duplicada)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "A receita já está na sua lista de favoritos!"
+            application/xml:
+              schema:
+                type: string
+                example: "<error><message>Receita duplicada</message></error>"
+
+  /api/favorites/{id}:
+    delete:
+      summary: Deleta receita por ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+        - in: query
+          name: formato
+          schema:
+            type: string
+            enum: [json, xml]
+      responses:
+        '204':
+          description: Deletado com sucesso (Sem conteúdo)
+        '404':
+          description: ID não encontrado
+
+  /api/pairing/suggestion:
+    get:
+      summary: Sugestão de Harmonização (Funcionalidade Extra)
+      description: Cruza dados da TheMealDB e TheCocktailDB para sugerir um jantar randômico.
+      responses:
+        '200':
+          description: Sugestão gerada com sucesso
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  main:
+                    type: string
+                    description: Nome do prato principal
+                    example: "Spicy Arrabiata Penne"
+                  drink:
+                    type: string
+                    description: Nome da bebida sugerida
+                    example: "Margarita"
+                  message:
+                    type: string
+                    description: Mensagem de sugestão
+                    example: "Prove Spicy Arrabiata Penne com Margarita"
+        '500':
+          description: Erro de comunicação com as APIs externas
+
+components:
+  schemas:
+    Recipe:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 1
+        externalId:
+          type: string
+          example: "52771"
+        name:
+          type: string
+          example: "Spicy Arrabiata Penne"
+        category:
+          type: string
+          example: "Vegetarian"
+        instructions:
+          type: string
+          example: "Bring a large pot of water to a boil..."
+        dateAdded:
+          type: string
+          format: date-time

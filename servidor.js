@@ -1,31 +1,47 @@
 // Import das bibliotecas
 const express = require('express');
 const axios = require('axios');
+const cors = require('cors');
+const xml2js = require('xml2js');
+const protobuf = require('protobufjs')
 
 const app = express();
 const port = 3000;  
 
 app.use(express.json());
+app.use(cors());
+
+// Protocol Buffer
+
+let ListaReceitasProto;
+
+protobuf.load("receitas.proto", function(err, root) {
+    if (err) throw err;
+    ListaReceitasProto = root.lookupType("receitas.ListaReceitas");
+});
 
 // CRUD
 
-// Vamos simular um banco de dados local para armazenar receitas favoritas (RAM)
+// banco de dados local
 let favoriteRecipes = [];
 let nextId = 1;
+const builder = new xml2js.Builder({ rootName: 'recipe' }); // só para ajudar a converter o Json em XML
 
 // CREATE (Adiciona uma receita favorita)
 // Este endpoint primeiro consulta a API TheMealDB para obter os dados da receita.
+
 // Endpoint: POST /api/favorites
 
 app.post('/api/favorites', async (req, res) => {
     const { mealName } = req.body;
+    const format = req.query.format;
     
     if (!mealName) {
         return res.status(400).json({ message: "O campo 'mealName' eh obrigatório no corpo req." });
     }
 
     try {
-        // 1. Consome a API externa para buscar a receita pelo nome
+        // Consome a API externa para buscar a receita pelo nome
         const resposta = await axios.get(`https://www.themealdb.com/api/json/v1/1/search.php?s=${mealName}`);
         const meal = resposta.data.meals ? resposta.data.meals[0] : null;
 
@@ -33,7 +49,18 @@ app.post('/api/favorites', async (req, res) => {
             return res.status(404).json({ message: `Receita nao encontrada na TheMealDB: ${mealName}` });
         }
 
-        // 2. Cria o novo objeto favorito, simplificando os dados
+        const duplicada = favoriteRecipes.find(r => r.externalId === meal.idMeal);
+        if (duplicada) {
+            const errorMsg = { message: `A receita '${meal.strMeal}' já está na sua lista!` };
+            
+            if (format === 'xml') {
+                res.type('application/xml');
+                return res.status(409).send(new xml2js.Builder({ rootName: 'error' }).buildObject(errorMsg));
+            }
+            return res.status(409).json(errorMsg);
+        }
+
+        // Cria o novo objeto favorito, simplificando os dados
         const newFavorite = {
             id: nextId++,
             externalId: meal.idMeal,
@@ -43,10 +70,15 @@ app.post('/api/favorites', async (req, res) => {
             dateAdded: new Date().toISOString()
         };
 
-        // 3. Adiciona ao nosso BD
+        // Adiciona ao BD
         favoriteRecipes.push(newFavorite);
 
-        // 4. Envia a resposta de sucesso
+        if (format === 'xml') {
+            res.header('Content-Type', 'application/xml');
+            return res.status(201).send(builder.buildObject(newFavorite));
+        }
+
+        // Envia a resposta de sucesso
         res.status(201).json(newFavorite);
     } catch (error) {
         console.error("Erro ao adicionar favorito:", error.message);
@@ -54,13 +86,37 @@ app.post('/api/favorites', async (req, res) => {
     }
 });
 
-// READ  - Le/Lista todas as receitas favoritas
 // Endpoint: GET /api/favorites
+// 2. READ (Lista Todos) 
 app.get('/api/favorites', (req, res) => {
-    // Retorna a lista completa de receitas favoritas
+    const format = req.query.format;
+
+    // Protobuf
+    if (format === 'proto') {
+        if (!ListaReceitasProto) return res.status(500).send("Protobuf erro.");
+        const payload = { receitas: favoriteRecipes };
+        
+        const errMsg = ListaReceitasProto.verify(payload);
+        if (errMsg) return res.status(500).send(errMsg);
+
+        const message = ListaReceitasProto.create(payload);
+        const buffer = ListaReceitasProto.encode(message).finish();
+
+        res.set('Content-Type', 'application/x-protobuf');
+        return res.send(buffer);
+    }
+
+    // XML
+    if (format === 'xml') {
+        res.header('Content-Type', 'application/xml');
+        const xmlBuilder = new xml2js.Builder({ rootName: 'favorites' });
+        const xmlObj = { recipe: favoriteRecipes };
+        return res.send(xmlBuilder.buildObject(xmlObj));
+    }
+
+    // Json
     res.json(favoriteRecipes);
 });
-
 // UPDATE (Atualiza o nome de uma receita favorita)
 // Endpoint: PUT /api/favorites/:id
 app.put('/api/favorites/:id', (req, res) => {
@@ -77,7 +133,6 @@ app.put('/api/favorites/:id', (req, res) => {
         return res.status(404).json({ message: "Receita favorita não encontrada." });
     }
 
-    // Atualiza apenas o campo 'name' no nosso registro local
     favoriteRecipes[favoriteIndex].name = newName;
 
     res.json(favoriteRecipes[favoriteIndex]);
@@ -86,26 +141,28 @@ app.put('/api/favorites/:id', (req, res) => {
 // DELETE (Deleta uma receita favorita)
 // Endpoint: DELETE /api/favorites/:id
 app.delete('/api/favorites/:id', (req, res) => {
-    const favoriteId = parseInt(req.params.id);
-    const initialLength = favoriteRecipes.length;
+    const id = parseInt(req.params.id);
+    const format = req.query.format;
+    const initialLen = favoriteRecipes.length;
 
-    // Filtra a lista, removendo o favorito com o ID especificado
-    favoriteRecipes = favoriteRecipes.filter(f => f.id !== favoriteId);
+    favoriteRecipes = favoriteRecipes.filter(f => f.id !== id);
 
-    if (favoriteRecipes.length === initialLength) {
-        return res.status(404).json({ message: "Receita favorita não encontrada para exclusão." });
+    if (favoriteRecipes.length === initialLen) {
+        const errorMsg = { message: "Receita não encontrada para exclusão." };
+        if (format === 'xml') {
+            res.type('application/xml');
+            return res.status(404).send(new xml2js.Builder({ rootName: 'error' }).buildObject(errorMsg));
+        }
+        return res.status(404).json(errorMsg);
     }
 
-    // Retorna uma resposta vazia com código 204 (No Content) para indicar sucesso na exclusao
     res.status(204).send();
 });
 
-// --- 2. Funcionalidade Extra: Cruzamento de Dados (Sugestão de Bebidas) ---
+// Funcionalidade Extra
 
-// Este endpoint pega uma receita aleatoria da TheMealDB e sugere uma bebida/cocktail da API TheCocktailDB (cruzamento de APIs)
+// Este endpoint pega uma receita aleatoria da sua lista de favoritos e sugere uma bebida/cocktail da API TheCocktailDB (cruzamento de APIs)
 // Endpoint: GET /api/pairing/suggestion
-
-
 
 app.get('/api/pairing/suggestion', async (req, res) => {
     try {
@@ -144,5 +201,5 @@ app.get('/api/pairing/suggestion', async (req, res) => {
 
 // Inicia o servidor na porta definida
 app.listen(port, () => {
-    console.log(`http://localhost:${port}`);
+    console.log(`http://localhost:${port}/api/favorites`);
 });
